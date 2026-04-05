@@ -275,3 +275,4 @@ Current state:
 - restrict CORS and authentication before multi-user or networked deployment
 - validate kill-switch allowlists and protected process rules carefully
 - treat model outputs as one input to operator action, not as perfect truth
+
