@@ -210,7 +210,6 @@ Manual or environment-dependent harnesses:
 
 - root-level `test_*.py` files
 - these are useful for local validation but are not used as the default CI quality gate because they depend more heavily on machine-specific Windows runtime behavior
-- older scratch tests were moved to `legacy_tests_sandbox/` so they do not interfere with normal automated discovery
 
 Recommended baseline:
 
