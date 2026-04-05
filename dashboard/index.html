@@ -1,0 +1,330 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RansomGuard - Ransomware Detection Dashboard</title>
+    <link rel="stylesheet" href="/dashboard/styles.css">
+<link rel="stylesheet" href="/dashboard/chat-widget.css">
+</head>
+<body>
+        <!-- Cinematic Intro Overlay -->
+    <div class="intro-overlay" id="intro-overlay">
+        <div class="intro-content">
+            <div class="intro-logo">
+                <div class="logo-shield">&#x1F6E1;&#xFE0F;</div>
+                <h1 class="logo-text">RansomGuard</h1>
+            </div>
+            <div class="intro-tagline">Real-Time Ransomware Detection</div>
+            <div class="loading-bar">
+                <div class="loading-progress" id="loading-progress"></div>
+            </div>
+            <div class="system-status" id="system-status">Initializing systems...</div>
+        </div>
+        <div class="particles" id="particles"></div>
+    </div>
+        <!-- Custom Cursor -->
+    <div class="cursor" id="cursor"></div>
+    <div class="cursor-follower" id="cursor-follower"></div>
+    <div class="page-wrapper">
+        <!-- Header -->
+        <header class="header">
+            <div class="header-inner">
+                <div class="brand">
+                    <span class="brand-icon">&#x1F6E1;&#xFE0F;</span>
+                    <h1 class="brand-name">RansomGuard</h1>
+                </div>
+                <nav class="nav">
+                    <a href="#overview" class="nav-link active">Overview</a>
+                    <a href="#process-lab" class="nav-link">Process Lab</a>
+                    <a href="#activity" class="nav-link">Activity</a>
+                    <a href="#detection" class="nav-link">Detection</a>
+                    <a href="#about" class="nav-link">About</a>
+
+                </nav>
+                <div class="connection-status" id="ws-status">
+                    <span class="status-dot"></span>
+                    <span class="status-text">Connecting...</span>
+                </div>
+            </div>
+        </header>
+
+        <!-- Hero Section -->
+        <section class="hero">
+            <div class="hero-content">
+                <h2 class="hero-title">Real-Time Ransomware Detection</h2>
+                <p class="hero-description">
+                    Behavioral analytics and file-system forensics combined into a single,
+                    enterprise-grade dashboard. Detect threats before encryption happens.
+                </p>
+
+
+            </div>
+        </section>
+
+        <!-- Stats Grid -->
+        <section class="stats-section" id="overview">
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <div class="stat-icon">&#x26A0;&#xFE0F;</div>
+                    <div class="stat-info">
+                        <div class="stat-label">Active Threats</div>
+                        <div class="stat-value" id="stat-threats">0</div>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon">&#x1F6E1;&#xFE0F;</div>
+                    <div class="stat-info">
+                        <div class="stat-label">Blocked Threats</div>
+                        <div class="stat-value" id="stat-blocked">0</div>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon">&#x1F4C1;</div>
+                    <div class="stat-info">
+                        <div class="stat-label">Files Monitored</div>
+                        <div class="stat-value" id="stat-files">0</div>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon">&#x2705;</div>
+                    <div class="stat-info">
+                        <div class="stat-label">Protection Rate</div>
+                        <div class="stat-value" id="stat-protection">100%</div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section class="test-section" id="process-lab">
+            <div class="section-header">
+                <h2 class="section-title">Process Lab</h2>
+                <p class="section-subtitle">
+                    Run the live ransomware simulation and track its real process details.
+                </p>
+            </div>
+            <div class="test-card">
+                <div class="test-controls">
+                    <button id="demo-start-btn" class="demo-button">Start Ransomware</button>
+                    <button id="demo-stop-btn" class="demo-button">Stop Ransomware</button>
+                    <p id="demo-status" class="test-message">Demo status: idle</p>
+                </div>
+                <div class="test-status">
+                    <div class="process-table-wrap">
+                        <table class="process-lab-table">
+                            <thead>
+                                <tr>
+                                    <th>Process ID</th>
+                                    <th>Name</th>
+                                    <th>Time</th>
+                                </tr>
+                            </thead>
+                            <tbody id="demo-process-table-body">
+                                <tr class="process-empty-row">
+                                    <td colspan="3">No ransomware demo process running.</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+            <div class="threat-summary-bar">
+                <div class="threat-summary-chip">
+                    Total Threats Handled:
+                    <span id="stat-total-threats">0</span>
+                </div>
+            </div>
+        </section>
+
+        <!-- Feature Cards -->
+        <section class="features-section">
+            <div class="feature-grid">
+                <div class="feature-card">
+                    <div class="feature-icon">&#x1F441;&#xFE0F;</div>
+                    <h3 class="feature-title">Process Monitoring</h3>
+                    <p class="feature-description">
+                        Monitor CPU, memory, threads, and file I/O patterns to build real-time
+                        behavioral fingerprints of your system.
+                    </p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">&#x1F4C2;</div>
+                    <h3 class="feature-title">File System Watch</h3>
+                    <p class="feature-description">
+                        Recursive monitoring of user directories with entropy checks and
+                        suspicious extension detection.
+                    </p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">&#x1F3AF;</div>
+                    <h3 class="feature-title">Zero False Positives</h3>
+                    <p class="feature-description">
+                        Conservative algorithms ensure legitimate applications never trigger
+                        false alarms.
+                    </p>
+                </div>
+            </div>
+        </section>
+
+        <!-- Activity Feed -->
+        <section class="activity-section" id="activity">
+            <div class="section-header">
+                <h2 class="section-title">Live Activity Feed</h2>
+                <p class="section-subtitle">
+                    Real-time monitoring powered by WebSocket connections. All data streams
+                    directly from your local defense engine.
+                </p>
+            </div>
+            <div class="activity-feed" id="activity-feed">
+                <div class="activity-placeholder">
+                    <div class="placeholder-icon">&#x1F4E1;</div>
+                    <p class="placeholder-text">Waiting for events...</p>
+                    <p class="placeholder-subtext">Last 40 events from the defense engine</p>
+                </div>
+            </div>
+        </section>
+
+        <section class="history-section" id="history">
+            <div class="section-header">
+                <h2 class="section-title">Threat History</h2>
+                <p class="section-subtitle">
+                    Every handled threat stays visible here, including closed incidents with preserved block history.
+                </p>
+            </div>
+            <div class="process-table-wrap threat-history-wrap">
+                <table class="process-lab-table threat-history-table">
+                    <thead>
+                        <tr>
+                            <th>PID</th>
+                            <th>Process Name</th>
+                            <th>Status</th>
+                            <th>Score</th>
+                            <th>Files Affected</th>
+                            <th>Time Detected</th>
+                        </tr>
+                    </thead>
+                    <tbody id="threat-history-body">
+                        <tr class="process-empty-row">
+                            <td colspan="6">No threats detected yet.</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        <!-- Engine Stats -->
+        <section class="engine-section">
+            <div class="section-header">
+                <h2 class="section-title">Engine Statistics</h2>
+                <p class="section-subtitle">
+                    Designed for real execution with live host telemetry and
+                    automated enforcement.
+                </p>
+            </div>
+            <div class="engine-grid">
+                <div class="engine-card">
+                    <h4 class="engine-title">Compact Event Display</h4>
+                    <p class="engine-text">
+                        Compact, glanceable interface showing process details, operations,
+                        paths, and risk scores in real-time.
+                    </p>
+                </div>
+                <div class="engine-card">
+                    <h4 class="engine-title">Sub-Second Latency</h4>
+                    <p class="engine-text">
+                        Sub-second latency event propagation with automatic reconnection and
+                        state synchronization.
+                    </p>
+                </div>
+                <div class="engine-card">
+                    <h4 class="engine-title">Persistent Logging</h4>
+                    <p class="engine-text">
+                        All events logged to database for historical analysis and threat
+                        pattern recognition.
+                    </p>
+                </div>
+                <div class="engine-card">
+                    <h4 class="engine-title">Entropy Analysis</h4>
+                    <p class="engine-text">
+                        Statistical analysis of file modifications to detect encryption
+                        attempts in progress.
+                    </p>
+                </div>
+            </div>
+        </section>
+
+        <!-- Detection Pipeline -->
+        <section class="detection-section" id="detection">
+            <div class="section-header">
+                <h2 class="section-title">3-Phase Protection Pipeline</h2>
+                <p class="section-subtitle">
+                    Real process telemetry moves through three strict phases:
+                    detect, score, and automatic containment.
+                </p>
+            </div>
+            <div class="pipeline-grid">
+                <div class="pipeline-stage">
+                    <div class="stage-number">1</div>
+                    <h4 class="stage-title">Detect</h4>
+                    <p class="stage-text">
+                        Live process and file-system events are captured from the host
+                        machine in real time.
+                    </p>
+                </div>
+                <div class="pipeline-stage">
+                    <div class="stage-number">2</div>
+                    <h4 class="stage-title">Score</h4>
+                    <p class="stage-text">
+                        Behavioral indicators and ML confidence are converted into a
+                        normalized 0-100 threat score.
+                    </p>
+                </div>
+                <div class="pipeline-stage">
+                    <div class="stage-number">3</div>
+                    <h4 class="stage-title">Terminate + Notify</h4>
+                    <p class="stage-text">
+                        Any process at score 60 or higher is terminated immediately.
+                        Notification is sent only after the action result.
+                    </p>
+                </div>
+            </div>
+        </section>
+
+        <!-- About Section -->
+        <section class="about-section" id="about">
+            <div class="section-header">
+                <h2 class="section-title">About This Project</h2>
+                <p class="section-subtitle">
+                    Share your thoughts, report issues, or request features.
+                </p>
+            </div>
+            <div class="about-content">
+                <p class="about-text">
+                    Built as a diploma final-year project, RansomGuard demonstrates
+                    enterprise-grade ransomware detection using behavioral fingerprinting,
+                    real-time monitoring, and machine learning anomaly detection.
+                </p>
+                <p class="about-text">
+                    This system combines process intelligence, file system monitoring, and
+                    network analysis to detect ransomware before encryption begins.
+                </p>
+            </div>
+        </section>
+
+        <!-- Footer -->
+        <footer class="footer">
+            <div class="footer-content">
+                <p>&copy; 2025 RansomGuard. Real-Time Ransomware Detection System.</p>
+                <p class="footer-note">WebSocket Status: <span id="footer-ws-status">Disconnected</span></p>
+            </div>
+        </footer>
+    </div>
+    <script src="https://cdn.jsdelivr.net/npm/apexcharts"></script>
+
+    <script src="/dashboard/chat-widget.js"></script>
+    <script src="/dashboard/dashboard1.js"></script>
+</body>
+</html>
+
+
+

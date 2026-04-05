@@ -1,0 +1,51 @@
+﻿name: CD
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  package:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install runtime dependencies
+        run: python -m pip install --upgrade pip && python -m pip install -r requirements.txt
+
+      - name: Prepare release bundle
+        shell: powershell
+        run: |
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          $items = @(
+            'backend',
+            'dashboard',
+            'data',
+            'ml_model',
+            'quality_tests',
+            'utils',
+            '.github',
+            'config.yaml',
+            'README.md',
+            '.gitignore',
+            'requirements.txt',
+            'run.py',
+            'rguard_service.py'
+          )
+          Compress-Archive -Path $items -DestinationPath dist/ransomguard-release.zip -Force
+
+      - name: Upload release artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ransomguard-release
+          path: dist/ransomguard-release.zip
+

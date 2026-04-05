@@ -1,0 +1,329 @@
+# ============================================================
+# RansomGuard Configuration File
+# Advanced Ransomware Detection System Settings
+# ============================================================
+
+# System Information
+system:
+  name: "RansomGuard Detection System"
+  version: "2.0.0"
+  environment: "production"  # production, development, testing
+
+# Backend Server Settings
+server:
+  host: "127.0.0.1"
+  port: 8000
+  reload: false  # Set to true for development
+  log_level: "info"  # debug, info, warning, error
+  workers: 1
+
+# Database Configuration
+database:
+  type: "sqlite"
+  path: "data/logs/events.db"
+  max_connections: 10
+  backup_enabled: true
+  backup_interval: 3600  # seconds (1 hour)
+
+# Machine Learning Model Settings
+ml_model:
+  model_path: "ml_model/models/lightgbm_model_v3.0.pkl"
+  scaler_path: "ml_model/models/lightgbm_scaler_v3.0.pkl"
+  auto_retrain: false
+  retrain_interval: 604800  # seconds (7 days)
+  contamination: 0.2  # Isolation Forest contamination parameter
+  n_estimators: 100
+
+# Behavioral Analysis Thresholds
+behavioral_analysis:
+  # File operation thresholds
+  rapid_modification_threshold: 10  # files per second
+  encryption_spike_threshold: 5     # encrypted files in short time
+  mass_operation_threshold: 50      # files in 10 seconds
+  
+  # Entropy thresholds
+  entropy_very_high: 7.5
+  entropy_high: 7.0
+  entropy_elevated: 6.5
+  
+  # Suspicious file extensions
+  suspicious_extensions:
+    - ".encrypted"
+    - ".locked"
+    - ".crypto"
+    - ".crypt"
+    - ".crypted"
+    - ".cerber"
+    - ".locky"
+    - ".zepto"
+    - ".odin"
+    - ".thor"
+    - ".666"
+    - ".abc"
+    - ".xyz"
+    - ".zzz"
+    - ".aaa"
+    - ".micro"
+    - ".wncry"
+    - ".wcry"
+    - ".WNCRY"
+    - ".onion"
+  
+  # Process monitoring
+  process_check_interval: 10  # seconds
+  high_cpu_threshold: 50      # percentage
+  excessive_threads: 20       # thread count
+
+# Kill-Switch Configuration
+killswitch:
+  enabled: true               # Enable automatic process termination
+  threat_threshold: 85        # Score (0-100) to trigger immediate termination - INCREASED FROM 60
+  quarantine_mode: false      # Block all suspicious activity
+  grace_period: 5             # seconds before forced termination
+  
+  # Protected processes (never terminate) - ADDED MORE PROCESSES
+  protected_processes:
+    - "System"
+    - "svchost.exe"
+    - "csrss.exe"
+    - "smss.exe"
+    - "services.exe"
+    - "lsass.exe"
+    - "winlogon.exe"
+    - "explorer.exe"
+    - "dwm.exe"
+    - "taskmgr.exe"
+    - "python.exe"  # Add your development tools here
+    - "code.exe"    # VS Code
+    - "chrome.exe"  # Chrome browser
+    - "firefox.exe" # Firefox browser
+    - "edge.exe"    # Edge browser
+    - "notepad.exe" # Notepad
+    - "powershell.exe" # PowerShell
+    - "cmd.exe"     # Command prompt
+    - "conhost.exe" # Console host
+    - "searchindexer.exe" # Windows search
+    - "spoolsv.exe" # Print spooler
+    - "audiodg.exe" # Audio service
+    - "wudfhost.exe" # Windows driver host
+    - "msdtc.exe"   # Microsoft DTC
+    - "fontdrvhost.exe" # Font driver host
+    - "sihost.exe"  # Shell infrastructure host
+    - "runtimebroker.exe" # Runtime broker
+    - "dllhost.exe" # DLL host
+    - "dashost.exe" # Device association service
+
+# Risk Scoring System
+risk_scoring:
+  # Score ranges
+  safe_max: 30
+  low_max: 50
+  medium_max: 70
+  high_max: 90
+  critical_min: 90
+  
+  # Severity levels
+  severities:
+    safe:
+      color: "#10b981"
+      label: "Safe"
+      action: "monitor"
+    
+    low:
+      color: "#3b82f6"
+      label: "Low Risk"
+      action: "log"
+    
+    medium:
+      color: "#f59e0b"
+      label: "Medium Risk"
+      action: "alert"
+    
+    high:
+      color: "#ef4444"
+      label: "High Risk"
+      action: "alert_admin"
+    
+    critical:
+      color: "#dc2626"
+      label: "Critical"
+      action: "kill_switch"
+
+# Monitoring Configuration
+monitoring:
+  # File system monitoring - REAL MODE
+  watch_paths:
+    # Leave empty to auto-detect safe user directories
+    # Or specify custom paths:
+    # - "D:\\MyData"
+    # - "C:\\Users\\YourName\\Projects"
+  
+  recursive: true  # Monitor subdirectories
+  file_events:
+    - "created"
+    - "modified"
+    - "deleted"
+    - "moved"
+  
+  # Process monitoring
+  monitor_processes: true  # REAL process monitoring
+  process_whitelist:  # Trusted processes (lower suspicion)
+    - "chrome.exe"
+    - "firefox.exe"
+    - "code.exe"
+    - "notepad.exe"
+    - "explorer.exe"
+    - "python.exe"
+
+# Alert System
+alerts:
+  enabled: true
+  
+  # Alert channels
+  channels:
+    websocket: true
+    email: false
+    sms: false
+    desktop_notification: true
+  
+  # Email settings (if enabled)
+  email:
+    smtp_server: "smtp.gmail.com"
+    smtp_port: 587
+    from_address: "ransomguard@example.com"
+    to_addresses:
+      - "admin@example.com"
+    username: ""
+    password: ""
+  
+  # Alert thresholds
+  alert_on_score: 60  # Alert when score exceeds this
+  max_alerts_per_minute: 10
+  
+  # Sound alerts
+  sound_alerts: true
+  sound_path: "assets/alert.wav"
+
+# Dashboard Settings
+dashboard:
+  # WebSocket settings
+  websocket_reconnect_delay: 3000  # milliseconds
+  max_events_display: 50
+  update_interval: 800  # milliseconds
+  
+  # Chart settings
+  chart_max_points: 40
+  animation_duration: 600  # milliseconds
+  
+  # Theme
+  theme: "dark"  # dark, light
+  
+  # Features
+  features:
+    export_csv: true
+    real_time_updates: true
+    threat_meter: true
+    risk_breakdown: true
+    activity_feed: true
+
+# Logging Configuration
+logging:
+  # Log levels: DEBUG, INFO, WARNING, ERROR, CRITICAL
+  console_level: "INFO"
+  file_level: "DEBUG"
+  
+  # Log files
+  log_dir: "data/logs"
+  log_file: "ransomguard.log"
+  max_log_size: 10485760  # 10 MB
+  backup_count: 5
+  
+  # Log format
+  format: "[%(asctime)s] %(levelname)s - %(name)s - %(message)s"
+  date_format: "%Y-%m-%d %H:%M:%S"
+
+# Performance Settings
+performance:
+  # Memory limits
+  max_events_in_memory: 500
+  cleanup_interval: 300  # seconds (5 minutes)
+  
+  # Threading
+  max_workers: 4
+  thread_pool_size: 10
+  
+  # Rate limiting
+  max_requests_per_second: 100
+  throttle_updates: true
+
+# Security Settings
+security:
+  # API security
+  enable_authentication: false
+  api_key: ""  # Sent as X-API-Key when authentication is enabled
+  jwt_secret: "your-secret-key-change-this"
+  token_expiry: 3600  # seconds (1 hour)
+  
+  # CORS
+  cors_origins:
+    - "http://localhost:8000"
+    - "http://127.0.0.1:8000"
+  
+  # Encryption
+  encrypt_logs: false
+
+# Optional integrations
+integrations:
+  gemini:
+    api_key: ""
+  encryption_key: ""
+
+# Advanced Features
+advanced:
+  # Offline mode
+  offline_detection: false
+  
+  # Recovery mode
+  auto_backup: false
+  backup_path: "data/backups"
+  backup_critical_files: false
+  
+  # Process graph
+  process_graph_enabled: false
+  graph_max_depth: 3
+  
+  # Export formats
+  export_formats:
+    - "csv"
+    - "json"
+    - "xml"
+  
+  # Training notebook
+  jupyter_notebook_path: "notebooks/training.ipynb"
+
+# Notification Preferences
+notifications:
+  browser_notifications: true
+  desktop_notifications: true
+  sound_enabled: true
+  vibrate: false
+
+# Controlled Folder Access (Windows Defender-like)
+# When enabled, selected folders are treated as "protected". Any process that
+# touches files inside them can be terminated immediately once threshold is met.
+controlled_folders:
+  enabled: true
+  auto_suspend: false
+  # Leave empty to use safe cross-machine defaults
+  # (Desktop, Documents, Downloads, Pictures).
+  paths: []
+  allowlist_processes:
+    - "explorer.exe"
+    - "code.exe"
+
+# Experimental Features (Use with caution)
+experimental:
+  ai_chat_assistant: false
+  cloud_sync: false
+  distributed_detection: false
+  blockchain_logging: false

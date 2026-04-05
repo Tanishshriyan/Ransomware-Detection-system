@@ -1,0 +1,35 @@
+﻿name: CI
+
+on:
+  push:
+    branches:
+      - main
+      - master
+      - develop
+  pull_request:
+
+jobs:
+  test:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install runtime dependencies
+        run: python -m pip install --upgrade pip && python -m pip install -r requirements.txt
+
+      - name: Compile Python sources
+        run: python -m compileall backend utils quality_tests run.py
+
+      - name: Smoke import backend and launcher
+        run: python -c "import backend.main; import run; print('smoke-import-ok')"
+
+      - name: Run unit tests
+        run: python -m unittest discover -s quality_tests -v
+
