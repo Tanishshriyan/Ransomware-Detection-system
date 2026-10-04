@@ -95,6 +95,20 @@ class ThreatManager:
         self._lock = threading.Lock()
         self._threats: Dict[int, ThreatRecord] = {}
         self._close_timers: Dict[int, threading.Timer] = {}
+        # Exact-PID exemptions are used only by the controlled, benign demo
+        # process. They never apply to arbitrary processes by name.
+        self._lab_exempt_pids: set[int] = set()
+
+    def exempt_pid(self, pid: int) -> None:
+        """Keep a registered lab process observable without terminating it."""
+        normalized_pid = int(pid or 0)
+        if normalized_pid > 0:
+            with self._lock:
+                self._lab_exempt_pids.add(normalized_pid)
+
+    def remove_pid_exemption(self, pid: int) -> None:
+        with self._lock:
+            self._lab_exempt_pids.discard(int(pid or 0))
 
     def process_event(self, pid: int, event: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -135,6 +149,7 @@ class ThreatManager:
         block_history_count = None
         block_history_count = None
         with self._lock:
+            lab_exempt = normalized_pid in self._lab_exempt_pids
             record = self._threats.get(normalized_pid)
             if record is None or self._should_start_new_incident(record, process_name, process_create_time):
                 record = ThreatRecord(
@@ -178,12 +193,17 @@ class ThreatManager:
             if record.status != ThreatStatus.BLOCKED:
                 self._cancel_close_timer_locked(normalized_pid)
 
-            if block_reasons:
+            if block_reasons and not lab_exempt:
                 if record.status == ThreatStatus.BLOCKED:
                     logger.info("PROCESS ALREADY BLOCKED: pid=%s", normalized_pid)
                 else:
                     record.status = ThreatStatus.BLOCKED
                     should_block = True
+            elif block_reasons and lab_exempt:
+                logger.info(
+                    "LAB DEMO EXEMPTION: recording threat without termination pid=%s",
+                    normalized_pid,
+                )
 
             threat_snapshot = record.to_dict()
             summary = self._build_summary_locked()

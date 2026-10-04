@@ -41,6 +41,7 @@ class Config:
         "RG_DB_PATH": "database.path",
         "RG_KILLSWITCH_ENABLED": "killswitch.enabled",
         "RG_KILLSWITCH_THRESHOLD": "killswitch.threat_threshold",
+        "RG_API_KEY": "security.api_key",
         "GEMINI_API_KEY": "integrations.gemini.api_key",
         "RG_GEMINI_API_KEY": "integrations.gemini.api_key",
     }

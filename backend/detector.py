@@ -13,6 +13,7 @@ import numpy as np
 from typing import Dict, Any, Optional
 import warnings
 import logging
+from ml_model.schema import MODEL_FEATURE_NAMES, SCHEMA_VERSION
 
 warnings.filterwarnings('ignore', category=UserWarning, module='sklearn')
 
@@ -29,82 +30,8 @@ class ThreatDetector:
     4. Returns comprehensive threat assessment
     """
     
-    # Feature order must match training data (85 features)
-    FEATURE_ORDER = [
-        # CPU Metrics (5 features)
-        "cpu_percent", "cpu_percent_max", "cpu_percent_min", 
-        "cpu_sustained_count", "cpu_variance",
-        
-        # Memory Metrics (5 features)
-        "memory_percent", "memory_percent_max", "memory_percent_min",
-        "memory_growth_rate", "memory_variance",
-        
-        # Thread Metrics (3 features)
-        "threads", "thread_spike_count", "thread_variance",
-        
-        # Process Timing (2 features)
-        "uptime", "process_age_seconds",
-        
-        # File Write Operations (6 features)
-        "file_writes", "file_write_rate", "file_write_burst_count",
-        "file_write_variance", "sequential_write_count", "random_write_count",
-        
-        # File Read Operations (4 features)
-        "file_reads", "file_read_rate", "file_read_write_ratio",
-        "large_file_read_count",
-        
-        # File Delete Operations (4 features)
-        "file_deletes", "file_delete_rate", "file_delete_burst_count",
-        "mass_delete_events",
-        
-        # File Rename Operations (4 features)
-        "file_renames", "file_rename_rate", "extension_change_count",
-        "suspicious_rename_pattern",
-        
-        # File Modifications (3 features)
-        "file_modifications", "modification_rate", "modification_burst_count",
-        
-        # Entropy Analysis (8 features)
-        "entropy_mean", "entropy_stddev", "entropy_max", "entropy_min",
-        "entropy_range", "entropy_variance", "entropy_change_rate",
-        "high_entropy_file_ratio",
-        
-        # File Operation Patterns (5 features)
-        "rapid_file_ops_count", "mass_file_change_events",
-        "read_write_delete_pattern", "cascading_modification_pattern",
-        "file_overwrite_count",
-        
-        # Extension Analysis (4 features)
-        "suspicious_extensions_count", "unknown_extension_count",
-        "double_extension_count", "extension_entropy",
-        
-        # Network Activity (6 features)
-        "network_connections", "network_connections_max", 
-        "suspicious_port_count", "c2_beacon_score",
-        "outbound_data_kb", "data_exfiltration_score",
-        
-        # Advanced Behavioral (8 features)
-        "process_injection_attempts", "registry_modification_count",
-        "shadow_copy_interaction", "backup_deletion_attempts",
-        "privilege_escalation_attempts", "anti_analysis_indicators",
-        "persistence_mechanism_count", "lateral_movement_score",
-        
-        # Parent Process Context (4 features)
-        "parent_suspicious", "parent_is_office", "parent_is_browser",
-        "spawned_by_script",
-        
-        # Timing Patterns (4 features)
-        "operation_time_variance", "inter_operation_delay_avg",
-        "burst_activity_score", "idle_time_ratio",
-
-        # --- NEW: MISSING 10 FEATURES (System Resources & IO) ---
-        # Added to satisfy the 85-feature requirement of the Scaler
-        "io_read_bytes_rate", "io_write_bytes_rate",
-        "page_faults_rate", "context_switches_rate",
-        "num_handles", "io_priority",
-        "working_set_size", "private_bytes",
-        "directory_traversal_depth", "unique_paths_touched"
-    ]
+    # Every inference path imports the one canonical schema.
+    FEATURE_ORDER = list(MODEL_FEATURE_NAMES)
 
     
     def __init__(self, behavioral_analyzer=None, config=None):
@@ -170,8 +97,16 @@ class ThreatDetector:
             
             self.model = joblib.load(model_path)
             self.scaler = joblib.load(scaler_path)
+            expected_features = len(self.FEATURE_ORDER)
+            model_features = getattr(self.model, "n_features_in_", expected_features)
+            scaler_features = getattr(self.scaler, "n_features_in_", expected_features)
+            if model_features != expected_features or scaler_features != expected_features:
+                raise ValueError(
+                    "Model artifact feature dimension mismatch: "
+                    f"expected={expected_features}, model={model_features}, scaler={scaler_features}"
+                )
             self.model_loaded = True
-            logger.info(f"[DETECTOR] ML model loaded: {model_path}")
+            logger.info("[DETECTOR] ML model loaded: %s (schema=%s)", model_path, SCHEMA_VERSION)
             logger.info(f"[DETECTOR] Scaler loaded: {scaler_path}")
         except Exception as e:
             self.load_error = str(e)
@@ -228,7 +163,7 @@ class ThreatDetector:
             self.stats['features_extracted'] += 1
             
             # Validate features
-            analysis = self._validate_features(features)
+            analysis = self.prepare_analysis(features)
             
             # Run ML prediction
             ml_result = self.analyze_features(analysis)
@@ -272,7 +207,7 @@ class ThreatDetector:
             result["suspicion_score"] = 0
             return result
     
-    def _validate_features(self, features: Dict) -> Dict:
+    def prepare_analysis(self, features: Dict) -> Dict:
         """Validate feature dictionary has all required features"""
         missing = []
         for feature_name in self.FEATURE_ORDER:
@@ -291,6 +226,9 @@ class ThreatDetector:
             "features": features,
             "feature_count": len(features)
         }
+
+    # Backwards-compatible private alias for older callers.
+    _validate_features = prepare_analysis
     
     def analyze_features(self, analysis: Dict) -> Dict:
         """

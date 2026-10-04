@@ -53,7 +53,8 @@ class MLScheduler:
             return False, False
 
         try:
-            analysis = self.analyzer.extract_features(pid)
+            raw_features = self.analyzer.extract_features(pid)
+            analysis = self.detector.prepare_analysis(raw_features) if raw_features else None
             if not analysis or not analysis.get("valid"):
                 self.state_machine.transition(pid, ThreatState.NORMAL)
                 return True, False

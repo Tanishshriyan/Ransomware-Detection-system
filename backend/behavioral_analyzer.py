@@ -19,6 +19,7 @@ from typing import Dict, Any, Optional, Set, List, Tuple
 from dataclasses import dataclass, field
 import psutil
 import logging
+from ml_model.schema import MODEL_FEATURE_NAMES
 
 logger = logging.getLogger("behavioral_analyzer")
 
@@ -96,6 +97,7 @@ class BehavioralAnalyzer:
     
     WINDOW_SECONDS = 60  # 60-second analysis window
     DECAY_INTERVAL = 120  # Apply decay every 2 minutes
+    MIN_ACTIVITY_EVENTS = 2  # Do not classify a process from resource metrics alone
     
     # Suspicious file extensions
     SUSPICIOUS_EXTENSIONS = {
@@ -275,6 +277,22 @@ class BehavioralAnalyzer:
             delete_times = [t for t in metrics.delete_timestamps if t > window_cutoff]
             rename_times = [t for t in metrics.rename_timestamps if t > window_cutoff]
             modify_times = [t for t in metrics.modify_timestamps if t > window_cutoff]
+
+            # A process scan by itself is not evidence of ransomware.  The
+            # previous implementation sent all-zero file/entropy vectors to
+            # the model, which produced a moderate score for many ordinary
+            # Windows services because that vector is outside the training
+            # distribution.  Wait for real activity before making an ML claim.
+            activity_events = (
+                len(write_times)
+                + len(read_times)
+                + len(delete_times)
+                + len(rename_times)
+                + len(modify_times)
+                + len(metrics.entropy_values)
+            )
+            if activity_events < self.MIN_ACTIVITY_EVENTS and not metrics.suspicious_ports:
+                return None
             
             # CPU metrics
             cpu_values = [val for ts, val in metrics.cpu_history if ts > window_cutoff]
@@ -429,7 +447,156 @@ class BehavioralAnalyzer:
                 "unique_paths_touched": 0.0
             }
             
-            return features
+            return self._to_model_features(
+                features=features,
+                metrics=metrics,
+                entropy_values=entropy_vals,
+                write_times=write_times,
+                read_times=read_times,
+                delete_times=delete_times,
+                rename_times=rename_times,
+            )
+
+    def _to_model_features(
+        self,
+        features: Dict[str, float],
+        metrics: ProcessMetrics,
+        entropy_values: List[float],
+        write_times: List[float],
+        read_times: List[float],
+        delete_times: List[float],
+        rename_times: List[float],
+    ) -> Dict[str, float]:
+        """Adapt live telemetry to the exact training schema.
+
+        The live analyzer has richer operational names than the research
+        dataset.  This explicit adapter makes every conversion visible and
+        guarantees that the model receives the same ordered feature contract
+        used during training.
+        """
+
+        operation_types = sum(
+            int(bool(values))
+            for values in (write_times, read_times, delete_times, rename_times)
+        )
+        entropy_mean = float(features.get("entropy_mean", 0.0))
+        entropy_max = float(features.get("entropy_max", 0.0))
+        entropy_min = float(features.get("entropy_min", 0.0))
+        high_entropy_count = sum(1 for value in entropy_values if value > 7.5)
+        low_entropy_count = sum(1 for value in entropy_values if value < 4.0)
+        entropy_trend = (
+            float(entropy_values[-1] - entropy_values[0])
+            if len(entropy_values) > 1
+            else 0.0
+        )
+        extension_count = len(metrics.extensions_seen)
+        document_count = sum(
+            1 for extension in metrics.extensions_seen if extension in self.KNOWN_EXTENSIONS
+        )
+        executable_count = sum(
+            1
+            for extension in metrics.extensions_seen
+            if extension in self.SUSPICIOUS_EXTENSIONS
+        )
+        file_operation_total = len(write_times) + len(read_times) + len(delete_times) + len(rename_times)
+
+        model_features = {
+            # Process metrics
+            "cpu_percent": features["cpu_percent"],
+            "cpu_percent_max": features["cpu_percent_max"],
+            "cpu_percent_min": features["cpu_percent_min"],
+            "cpu_spike_count": features["cpu_sustained_count"],
+            "cpu_sustained_count": features["cpu_sustained_count"],
+            "memory_percent": features["memory_percent"],
+            "memory_percent_max": features["memory_percent_max"],
+            "memory_percent_growth": features["memory_growth_rate"],
+            "threads": features["threads"],
+            "thread_creation_rate": 0.0,
+            "uptime": features["uptime"],
+            "parent_risk": features["parent_suspicious"],
+            "privilege_level": 0.0,
+            "user_context": 0.0,
+            "process_age": features["process_age_seconds"],
+            # File operations
+            "file_writes": features["file_writes"],
+            "file_reads": features["file_reads"],
+            "file_deletes": features["file_deletes"],
+            "file_renames": features["file_renames"],
+            "file_modifications": features["file_modifications"],
+            "file_creates": features["file_writes"],
+            "file_write_rate": features["file_write_rate"],
+            "file_read_rate": features["file_read_rate"],
+            "file_delete_rate": features["file_delete_rate"],
+            "file_rename_rate": features["file_rename_rate"],
+            "rapid_file_ops_count": features["rapid_file_ops_count"],
+            "mass_file_change_events": features["mass_file_change_events"],
+            "sequential_file_ops": min(1.0, features["rapid_file_ops_count"] / 100.0),
+            "file_size_changes": features["file_modifications"],
+            "large_file_writes": 0.0,
+            "small_file_writes": 0.0,
+            "file_operation_diversity": operation_types / 4.0,
+            "file_access_pattern": float(features["read_write_delete_pattern"]),
+            "file_overwrite_count": features["file_overwrite_count"],
+            "unique_files_accessed": float(file_operation_total),
+            # Entropy
+            "entropy_mean": entropy_mean,
+            "entropy_variance": features["entropy_variance"],
+            "entropy_max": entropy_max,
+            "entropy_min": entropy_min,
+            "entropy_spike_count": float(high_entropy_count),
+            "high_entropy_file_ratio": features["high_entropy_file_ratio"],
+            "entropy_change_rate": abs(entropy_trend),
+            "entropy_stddev": features["entropy_stddev"],
+            "entropy_range": features["entropy_range"],
+            "low_entropy_count": float(low_entropy_count),
+            "median_entropy": entropy_mean,
+            "entropy_trend": entropy_trend,
+            # Extensions
+            "extension_changes": float(len(metrics.extension_changes)),
+            "suspicious_extensions_count": features["suspicious_extensions_count"],
+            "unique_extensions": float(extension_count),
+            "extension_diversity": features["extension_entropy"],
+            "ransomware_extensions": features["suspicious_extensions_count"],
+            "document_extensions": float(document_count),
+            "executable_extensions": float(executable_count),
+            "extension_change_rate": float(len(metrics.extension_changes) / self.WINDOW_SECONDS * 60.0),
+            # Network
+            "network_connections": features["network_connections"],
+            "suspicious_port_connections": features["suspicious_port_count"],
+            "outbound_data_kb": features["outbound_data_kb"],
+            "inbound_data_kb": float(metrics.network_bytes_recv / 1024.0),
+            "c2_beacon_pattern": features["c2_beacon_score"],
+            "connection_frequency": features["network_connections"] / self.WINDOW_SECONDS * 60.0,
+            "unique_ip_connections": features["network_connections_max"],
+            "dns_lookups": 0.0,
+            "http_connections": 0.0,
+            "tls_connections": 0.0,
+            # Registry and system behavior
+            "registry_modifications": features["registry_modification_count"],
+            "startup_key_changes": 0.0,
+            "security_setting_changes": 0.0,
+            "registry_deletes": 0.0,
+            "registry_creates": 0.0,
+            "persistence_mechanisms": features["persistence_mechanism_count"],
+            "run_key_adds": 0.0,
+            "service_installs": 0.0,
+            # Advanced patterns
+            "process_injection_attempts": features["process_injection_attempts"],
+            "dll_injections": 0.0,
+            "code_hollowing": 0.0,
+            "shadow_copy_deletes": features["shadow_copy_interaction"],
+            "backup_deletions": features["backup_deletion_attempts"],
+            "volume_shadow_disables": features["shadow_copy_interaction"],
+            "recovery_mode_disables": 0.0,
+            # Behavioral patterns
+            "read_write_delete_pattern": features["read_write_delete_pattern"],
+            "encryption_signature": float(features["high_entropy_file_ratio"] >= 0.7),
+            "mass_enumeration": float(features["mass_file_change_events"] > 0),
+            "lateral_movement": features["lateral_movement_score"],
+            "credential_access": 0.0,
+        }
+
+        return {name: float(model_features.get(name, 0.0)) for name in MODEL_FEATURE_NAMES}
     
     # Helper methods (same as before)
     def _track_extension(self, metrics: ProcessMetrics, file_path: str) -> None:

@@ -4,6 +4,8 @@ from typing import Dict, Any, List, Set
 import joblib
 import os
 
+from ml_model.schema import LABEL_COLUMN, MODEL_FEATURE_NAMES, canonicalize_features
+
 WINDOW_SECONDS_DEFAULT = 60
 
 # ------------------ Feature Extractor ------------------
@@ -141,12 +143,7 @@ class RansomwareMLModel:
         self.model = None
         self.scaler = None
         self.model_dir = model_dir
-        self.feature_columns = [
-            "cpu_percent", "memory_percent", "file_writes", "file_renames",
-            "entropy_mean", "entropy_std", "write_rate", "rename_write_ratio",
-            "unique_extensions", "threads", "network_connections", "uptime",
-            "parent_risk", "entropy_spike"
-        ]
+        self.feature_columns = list(MODEL_FEATURE_NAMES)
         os.makedirs(self.model_dir, exist_ok=True)
 
     def train(self, train_csv_path="data/training_data/ransomware_dataset.csv", model_type="lightgbm"):
@@ -158,8 +155,10 @@ class RansomwareMLModel:
         from sklearn.metrics import classification_report
 
         df = pd.read_csv(train_csv_path)
-        X = df[self.feature_columns].values.astype(float)
-        y = df["malware_label"].astype(int).values
+        from ml_model.schema import validate_feature_columns
+        validate_feature_columns(list(df.columns), label_column=LABEL_COLUMN, require_order=True)
+        X = df.loc[:, list(MODEL_FEATURE_NAMES)].values.astype(float)
+        y = df[LABEL_COLUMN].astype(int).values
 
         # Scale
         self.scaler = StandardScaler()
@@ -221,7 +220,8 @@ class RansomwareMLModel:
         if not self.model or not self.scaler:
             return {"is_ransomware": False, "confidence": 0, "probability": 0.0, "model_status": "not_loaded"}
         try:
-            X = np.array([[features.get(col, 0) for col in self.feature_columns]])
+            ordered = canonicalize_features(features)
+            X = np.array([[ordered[col] for col in self.feature_columns]])
             X_scaled = self.scaler.transform(X)
             pred = self.model.predict(X_scaled)[0]
             proba = self.model.predict_proba(X_scaled)[0] if hasattr(self.model, "predict_proba") else [1-pred, pred]

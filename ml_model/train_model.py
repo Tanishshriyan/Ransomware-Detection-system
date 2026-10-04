@@ -18,6 +18,11 @@ from typing import Dict, List, Tuple, Optional
 import warnings
 warnings.filterwarnings('ignore')
 
+if sys.platform == "win32":
+    for _stream in (sys.stdout, sys.stderr):
+        if _stream is not None and hasattr(_stream, "reconfigure"):
+            _stream.reconfigure(encoding="utf-8", errors="replace")
+
 # ===========================================================================
 # DEPENDENCY CHECKS
 # ===========================================================================
@@ -59,6 +64,8 @@ from sklearn.metrics import (
     accuracy_score, precision_score, recall_score, f1_score,
     confusion_matrix, classification_report, roc_auc_score, roc_curve
 )
+from ml_model.schema import LABEL_COLUMN as SCHEMA_LABEL_COLUMN
+from ml_model.schema import MODEL_FEATURE_NAMES, SCHEMA_VERSION
 
 # ===========================================================================
 # CONFIGURATION
@@ -101,55 +108,10 @@ class Config:
         'class_weight': 'balanced'
     }
     
-    # Expected feature names (85 features) - WITH UNDERSCORES
-    FEATURE_NAMES = [
-        # Process Metrics (15 features)
-        "cpu_percent", "cpu_percent_max", "cpu_percent_min", "cpu_spike_count", 
-        "cpu_sustained_count", "memory_percent", "memory_percent_max", 
-        "memory_percent_growth", "threads", "thread_creation_rate", 
-        "uptime", "parent_risk", "privilege_level", "user_context", "process_age",
-        
-        # File Operations (20 features)
-        "file_writes", "file_reads", "file_deletes", "file_renames", 
-        "file_modifications", "file_creates", "file_write_rate", "file_read_rate",
-        "file_delete_rate", "file_rename_rate", "rapid_file_ops_count", 
-        "mass_file_change_events", "sequential_file_ops", "file_size_changes",
-        "large_file_writes", "small_file_writes", "file_operation_diversity",
-        "file_access_pattern", "file_overwrite_count", "unique_files_accessed",
-        
-        # Entropy Analysis (12 features)
-        "entropy_mean", "entropy_variance", "entropy_max", "entropy_min",
-        "entropy_spike_count", "high_entropy_file_ratio", "entropy_change_rate",
-        "entropy_stddev", "entropy_range", "low_entropy_count", 
-        "median_entropy", "entropy_trend",
-        
-        # Extension Tracking (8 features)
-        "extension_changes", "suspicious_extensions_count", 
-        "unique_extensions", "extension_diversity", "ransomware_extensions",
-        "document_extensions", "executable_extensions", "extension_change_rate",
-        
-        # Network Activity (10 features)
-        "network_connections", "suspicious_port_connections", 
-        "outbound_data_kb", "inbound_data_kb", "c2_beacon_pattern",
-        "connection_frequency", "unique_ip_connections", "dns_lookups",
-        "http_connections", "tls_connections",
-        
-        # Registry Operations (8 features)
-        "registry_modifications", "startup_key_changes", 
-        "security_setting_changes", "registry_deletes", "registry_creates",
-        "persistence_mechanisms", "run_key_adds", "service_installs",
-        
-        # Advanced Patterns (7 features)
-        "process_injection_attempts", "dll_injections", "code_hollowing",
-        "shadow_copy_deletes", "backup_deletions", "volume_shadow_disables",
-        "recovery_mode_disables",
-        
-        # Behavioral Patterns (5 features)
-        "read_write_delete_pattern", "encryption_signature", 
-        "mass_enumeration", "lateral_movement", "credential_access"
-    ]
-    
-    LABEL_COLUMN = "malware_label"
+    # Every training run imports the one canonical ordered schema.
+    FEATURE_NAMES = list(MODEL_FEATURE_NAMES)
+    LABEL_COLUMN = SCHEMA_LABEL_COLUMN
+    SCHEMA_VERSION = SCHEMA_VERSION
     EXPECTED_FEATURE_COUNT = 85
     
     # Validate feature count at startup

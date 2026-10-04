@@ -682,7 +682,8 @@ class FileSystemIntelligence(FileSystemEventHandler if WATCHDOG_AVAILABLE else o
              controlled_folder_handler: Optional[Callable[[str, str, int, List[str]], None]] = None,
              protected_paths: Optional[List[str]] = None,
              pid_resolver: Optional[Callable[[str], int]] = None,
-             blocked_pid_checker: Optional[Callable[[int, Optional[float]], bool]] = None):
+             blocked_pid_checker: Optional[Callable[[int, Optional[float]], bool]] = None,
+             research_hook: Optional[Callable[[str, Any, Optional[Dict[str, Any]]], None]] = None):
         if WATCHDOG_AVAILABLE:
             super().__init__()
         
@@ -691,6 +692,7 @@ class FileSystemIntelligence(FileSystemEventHandler if WATCHDOG_AVAILABLE else o
         self.controlled_folder_handler = controlled_folder_handler
         self.pid_resolver = pid_resolver
         self.blocked_pid_checker = blocked_pid_checker
+        self.research_hook = research_hook
         self.protected_paths = [os.path.normcase(os.path.abspath(p)) for p in (protected_paths or [])]
         self.file_operations: deque = deque(maxlen=1000)
         self.file_entropy_cache: Dict[str, Tuple[float, float]] = {}  # path: (entropy, timestamp)
@@ -711,6 +713,18 @@ class FileSystemIntelligence(FileSystemEventHandler if WATCHDOG_AVAILABLE else o
         """Analyze file for suspicious characteristics"""
         indicators = []
         entropy = None
+
+        # A move/rename notification can arrive after the source or
+        # destination has disappeared.  Filename indicators remain valid in
+        # that case, so evaluate them before the existence check.
+        basename = os.path.basename(filepath)
+        is_ransom, ext_indicator = is_ransomware_extension(basename)
+        if is_ransom:
+            indicators.append(ext_indicator)
+            self.stats['ransomware_extensions_detected'] += 1
+        is_susp, name_indicators = is_suspicious_filename(basename)
+        if is_susp:
+            indicators.extend(name_indicators)
         
         try:
             # Check if file exists
@@ -750,16 +764,6 @@ class FileSystemIntelligence(FileSystemEventHandler if WATCHDOG_AVAILABLE else o
                     if entropy > ThreatConfig.ENTROPY_THRESHOLD:
                         indicators.append(f"high_entropy:{entropy:.2f}")
                         self.stats['high_entropy_files'] += 1
-            
-            # Check filename
-            is_ransom, ext_indicator = is_ransomware_extension(os.path.basename(filepath))
-            if is_ransom:
-                indicators.append(ext_indicator)
-                self.stats['ransomware_extensions_detected'] += 1
-            
-            is_susp, name_indicators = is_suspicious_filename(os.path.basename(filepath))
-            if is_susp:
-                indicators.extend(name_indicators)
             
         except Exception as e:
             pass
@@ -810,13 +814,18 @@ class FileSystemIntelligence(FileSystemEventHandler if WATCHDOG_AVAILABLE else o
         print(f"[ANALYSING] {operation.upper()} -> {os.path.basename(filepath)}")
         self.stats['total_events'] += 1
 
-        # PID-first enforcement: file events without a live PID are ignored.
-        pid = self._get_process_for_file_pid(filepath)
-        if (not pid or pid <= 0) and self.pid_resolver:
+        # Prefer the monitor's registered external-process mapping. The
+        # fallback open-file scan is expensive on Windows and blocks
+        # watchdog's single event-dispatch thread long enough to lose the
+        # burst of rename events produced by the demo.
+        pid = 0
+        if self.pid_resolver:
             try:
                 pid = int(self.pid_resolver(filepath) or 0)
             except Exception:
                 pid = 0
+        if not pid or pid <= 0:
+            pid = self._get_process_for_file_pid(filepath)
         process = int(pid or 0)
         if process <= 0:
             logger.debug("[FILE EVENT IGNORED] Missing PID op=%s path=%s", operation, filepath)
@@ -839,8 +848,40 @@ class FileSystemIntelligence(FileSystemEventHandler if WATCHDOG_AVAILABLE else o
             logger.debug("[FILE EVENT IGNORED] Dead PID pid=%s op=%s path=%s", process, operation, filepath)
             return
 
+        if self.research_hook:
+            try:
+                self.research_hook("first_telemetry", {
+                    "pid": process,
+                    "event_type": operation,
+                    "path": filepath,
+                    "old_path": (metadata or {}).get("old_path"),
+                }, None)
+            except Exception:
+                logger.debug("[RESEARCH] first telemetry hook failed", exc_info=True)
+
         # Analyze file only after a live PID is resolved.
         entropy, indicators = self.analyze_file(filepath) if operation != 'deleted' else (None, [])
+
+        # Feed file telemetry into the same behavioral model used by the
+        # process scanner. Without this bridge the ML path sees only process
+        # snapshots and cannot learn that the registered process is performing
+        # mass renames/deletes.
+        if self.behavioral_analyzer:
+            try:
+                analyzer_event = {
+                    "valid": True,
+                    "pid": process,
+                    "event_type": operation.upper(),
+                    "path": filepath,
+                    "entropy": entropy,
+                }
+                if metadata and metadata.get("old_path"):
+                    analyzer_event["old_path"] = metadata["old_path"]
+                self.behavioral_analyzer.ingest_event(analyzer_event)
+                if self.research_hook:
+                    self.research_hook("feature_generation", analyzer_event, None)
+            except Exception:
+                logger.debug("[ANALYZER] Failed to ingest file event", exc_info=True)
 
         # Controlled folder enforcement (highest priority signal).
         # If the file touched is inside a protected path, trigger immediate user-decision workflow.
@@ -1167,9 +1208,15 @@ class SystemMonitor:
         self,
         callback: Optional[Callable[[Dict[str, Any]], None]] = None,
         threat_manager: Optional[ThreatManager] = None,
+        analyzer: Optional[BehavioralAnalyzer] = None,
+        detector: Optional[ThreatDetector] = None,
+        research_hook: Optional[Callable[[str, Any, Optional[Dict[str, Any]]], None]] = None,
     ):
-        self.analyzer = BehavioralAnalyzer()
-        self.ml_detector = ThreatDetector()
+        # Reuse the application-level analyzer and detector when provided so
+        # the monitor, scheduler, and dashboard report one consistent stream
+        # of features and predictions.
+        self.analyzer = analyzer or BehavioralAnalyzer()
+        self.ml_detector = detector or ThreatDetector()
         self.callback = callback
         self.threat_manager = threat_manager
         self.monitoring = False
@@ -1218,6 +1265,7 @@ class SystemMonitor:
             protected_paths=self.controlled_folder_paths,
             pid_resolver=self._resolve_pid_for_file,
             blocked_pid_checker=self._is_blocked_pid,
+            research_hook=research_hook,
         )
 
         self.network_intel = NetworkIntelligence()
@@ -1316,13 +1364,21 @@ class SystemMonitor:
         pid: int,
         process_name: Optional[str] = None,
         exe_path: Optional[str] = None,
+        target_paths: Optional[List[str]] = None,
     ) -> None:
         if pid <= 0:
             return
+        normalized_targets = []
+        for path in target_paths or []:
+            try:
+                normalized_targets.append(os.path.normcase(os.path.abspath(str(path))))
+            except Exception:
+                continue
         self.registered_external_processes[int(pid)] = {
             "pid": int(pid),
             "process_name": process_name or "unknown",
             "exe_path": exe_path or "",
+            "target_paths": normalized_targets,
             "registered_at": time.time(),
         }
 
@@ -1348,7 +1404,19 @@ class SystemMonitor:
         return int(active[0]["pid"])
 
     def _resolve_pid_for_file(self, _filepath: str) -> int:
-        return self._resolve_registered_external_pid()
+        filepath = os.path.normcase(os.path.abspath(str(_filepath or "")))
+        candidates = []
+        for pid, info in list(self.registered_external_processes.items()):
+            if not psutil.pid_exists(pid):
+                continue
+            for target in info.get("target_paths", []):
+                if filepath == target or filepath.startswith(target + os.sep):
+                    candidates.append(pid)
+                    break
+
+        if len(candidates) == 1:
+            return int(candidates[0])
+        return 0
 
     def _resolve_process_name(self, pid: int, fallback: str = "unknown") -> str:
         pid = int(pid or 0)
@@ -1786,7 +1854,10 @@ class SystemMonitor:
                         event = {
                             "valid": True,
                             "type": "process_event",
-                            "event_type": "WRITE", 
+                            # This is a process snapshot, not a file write.  The
+                            # previous value inflated file-write features once
+                            # per process scan and caused false ML signals.
+                            "event_type": "PROCESS_SNAPSHOT",
                             "pid": snapshot.pid,
                             "process_name": snapshot.name,
                             "cpu_percent": snapshot.cpu_percent,
@@ -1798,7 +1869,8 @@ class SystemMonitor:
                         self.analyzer.ingest_event(event)
                         
                         # 6. ML feature extraction and model decision
-                        analysis = self.analyzer.extract_features(snapshot.pid)
+                        raw_features = self.analyzer.extract_features(snapshot.pid)
+                        analysis = self.ml_detector.prepare_analysis(raw_features) if raw_features else None
                         prob = 0.0
                         ml_result = None
                         decision = "UNKNOWN"
@@ -2172,8 +2244,22 @@ class SystemMonitor:
         event_dict["metadata"].setdefault("pipeline_model", "3-phase")
 
         registry_result = None
+        if self.file_intel.research_hook:
+            try:
+                # Decision timestamp is taken before ThreatManager can block
+                # the PID, so it cannot collapse into containment time.
+                self.file_intel.research_hook("decision", event, None)
+            except Exception:
+                logger.debug("[RESEARCH] decision hook failed", exc_info=True)
         if self.threat_manager:
             registry_result = self.threat_manager.process_event(pid, event_dict)
+
+        if self.file_intel.research_hook:
+            try:
+                if registry_result and registry_result.get("block_attempted"):
+                    self.file_intel.research_hook("containment", event, registry_result)
+            except Exception:
+                logger.debug("[RESEARCH] telemetry hook failed", exc_info=True)
 
         if registry_result and not registry_result.get("tracked"):
             return
@@ -2218,6 +2304,33 @@ class SystemMonitor:
             kill_success = bool(registry_result.get("kill_success"))
             if kill_success:
                 self.stats["processes_killed"] += 1
+
+            try:
+                self.notification_manager.send_info_notification(
+                    title="Threat blocked" if kill_success else "Threat action required",
+                    line1=(
+                        f"{process_name} (PID {pid}) terminated"
+                        if kill_success
+                        else f"{process_name} (PID {pid}) could not be terminated"
+                    ),
+                    line2=(
+                        f"Score {int(event.suspicion_score or 0)} | "
+                        f"Source {event.metadata.get('source', event.event_type)}"
+                    ),
+                )
+            except Exception:
+                logger.debug("[TOAST] Automatic protection notification failed", exc_info=True)
+
+            logger.warning(
+                "[AUTO-CONTAINMENT] %s pid=%s process=%s score=%s threshold=%s active=%s blocked=%s",
+                "SUCCESS" if kill_success else "FAILED",
+                pid,
+                process_name,
+                int(event.suspicion_score or 0),
+                int(self.threat_manager.block_threshold if self.threat_manager else self.killswitch.threat_threshold),
+                int(summary.get("active_threats", 0)),
+                int(summary.get("blocked_threats", 0)),
+            )
 
             action_payload = {
                 "success": kill_success,

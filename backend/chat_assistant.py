@@ -9,7 +9,8 @@ from datetime import datetime
 from typing import Dict, List
 
 try:
-    import google.generativeai as genai
+    # google-generativeai is retired; use the supported google-genai client.
+    from google import genai
 except Exception:  # pragma: no cover - optional dependency
     genai = None
 
@@ -28,10 +29,9 @@ class RansomGuardChatbot:
 
         if genai and self.api_key:
             try:
-                genai.configure(api_key=self.api_key)
-                self.client = genai.GenerativeModel(self.model_name)
+                self.client = genai.Client(api_key=self.api_key)
                 self.provider = self.model_name
-                print("[OK] RansomGuard Chatbot: Google Gemini API configured successfully")
+                print("[OK] RansomGuard Chatbot: Google Gen AI API configured successfully")
             except Exception as e:
                 self.api_key_error = str(e)
                 self.client = None
@@ -45,8 +45,8 @@ class RansomGuardChatbot:
             print(f"! RansomGuard Chatbot: {self.api_key_error}")
         elif not genai:
             self.api_key_error = (
-                "google.generativeai library not available. "
-                "Install: pip install google-generativeai"
+                "google-genai library not available. "
+                "Install: pip install google-genai"
             )
             print(f"! RansomGuard Chatbot: {self.api_key_error}")
 
@@ -61,19 +61,9 @@ class RansomGuardChatbot:
         if not genai or not self.api_key:
             return preferred_models[0]
 
-        try:
-            genai.configure(api_key=self.api_key)
-            available = {
-                str(model.name).split("/", 1)[-1]
-                for model in genai.list_models()
-                if "generateContent" in (getattr(model, "supported_generation_methods", []) or [])
-            }
-            for candidate in preferred_models:
-                if candidate in available:
-                    return candidate
-        except Exception:
-            pass
-
+        # Avoid a network call during application startup.  If the configured
+        # model is unavailable, chat() falls back to the deterministic local
+        # assistant with an explicit warning.
         return preferred_models[0]
 
     def build_system_prompt(self) -> str:
@@ -164,7 +154,10 @@ class RansomGuardChatbot:
             if self.client is None:
                 raise RuntimeError("cloud_model_unavailable")
 
-            response = self.client.generate_content(prompt)
+            response = self.client.models.generate_content(
+                model=self.model_name,
+                contents=prompt,
+            )
             assistant_message = self._extract_response_text(response)
             model_name = self.provider
         except Exception as e:

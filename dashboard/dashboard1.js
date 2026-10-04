@@ -3,6 +3,11 @@
    Real-time WebSocket monitoring
    =================================== */
 
+window.ransomGuardApiHeaders = window.ransomGuardApiHeaders || function (headers = {}) {
+    const key = window.localStorage.getItem('ransomguard_api_key');
+    return key ? { ...headers, 'X-API-Key': key } : headers;
+};
+
 /* ===================================
    CINEMATIC INTRO SEQUENCE
    =================================== */
@@ -375,7 +380,9 @@ connectWebSocket() {
     }
 
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${protocol}//${window.location.host}/ws`;
+    const apiKey = window.localStorage.getItem('ransomguard_api_key');
+    const wsSuffix = apiKey ? `?api_key=${encodeURIComponent(apiKey)}` : '';
+    const wsUrl = `${protocol}//${window.location.host}/ws${wsSuffix}`;
     console.log('ðŸ”Œ Connecting to WebSocket:', wsUrl);
 
     this.manualClose = false;
@@ -498,7 +505,9 @@ rememberEventKey(key) {
 
 async syncPendingAlerts() {
     try {
-        const response = await fetch('/api/pending_alerts');
+        const response = await fetch('/api/pending_alerts', {
+            headers: window.ransomGuardApiHeaders(),
+        });
         if (!response.ok) {
             return;
         }
@@ -906,6 +915,7 @@ updateConnectionStatus(connected) {
         const score = Number.parseInt(action.score || 0, 10) || 0;
         const ts = action.timestamp || (Date.now() / 1000);
         const label = action.status || action.action || 'monitor_only';
+        const actionName = String(action.action || '').toLowerCase();
         this.addToActivityFeed(process, label, score, ts, pid, action.reason || label);
         this.upsertThreatHistoryEntry({
             pid: action.pid,
@@ -927,12 +937,12 @@ updateConnectionStatus(connected) {
             });
         }
 
-        if (label === 'terminated') {
+        if (actionName === 'terminated' || String(label).toLowerCase() === 'terminated') {
             this.showNotification('Threat Blocked', {
                 body: `${process} (PID ${pid}) terminated at score ${score}`,
                 icon: '\u2705'
             });
-        } else if (label === 'termination_failed') {
+        } else if (actionName === 'termination_failed' || String(label).toLowerCase() === 'termination_failed') {
             this.showNotification('Termination Failed', {
                 body: `${process} (PID ${pid}) could not be terminated`,
                 icon: '\u26A0\uFE0F'
@@ -1008,7 +1018,9 @@ updateConnectionStatus(connected) {
     // === API Calls ===
     async fetchInitialStats() {
         try {
-            const response = await fetch('/api/status');
+            const response = await fetch('/api/status', {
+                headers: window.ransomGuardApiHeaders(),
+            });
             if (!response.ok) throw new Error('Failed to fetch status');
             
             const data = await response.json();
@@ -1035,7 +1047,9 @@ updateConnectionStatus(connected) {
         if (!statusEl || !tableBodyEl) return;
 
         try {
-            const resp = await fetch('/api/demo/status');
+            const resp = await fetch('/api/demo/status', {
+                headers: window.ransomGuardApiHeaders(),
+            });
             const data = await resp.json();
             if (!resp.ok || !data.success) {
                 statusEl.textContent = `Demo status: unavailable`;
@@ -1073,7 +1087,7 @@ updateConnectionStatus(connected) {
         try {
             const response = await fetch('/api/demo/start', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: window.ransomGuardApiHeaders({ 'Content-Type': 'application/json' }),
                 body: JSON.stringify({ duration: 30, batch_size: 30, rename_ext: '.lockbit', create_ransom_note: true }),
             });
             const data = await response.json();
@@ -1096,7 +1110,7 @@ updateConnectionStatus(connected) {
         try {
             const response = await fetch('/api/demo/stop', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: window.ransomGuardApiHeaders({ 'Content-Type': 'application/json' }),
             });
             const data = await response.json();
             if (!response.ok || !data.success) {

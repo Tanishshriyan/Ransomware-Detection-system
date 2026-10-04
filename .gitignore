@@ -18,6 +18,12 @@ dist/
 data/logs/
 data/*.db
 data/quarantine/
+data/test_monitoring/
+
+# Local research experiments and generated traces are intentionally not part
+# of the application repository.
+research/
+quality_tests/test_research_instrumentation.py
 
 *.db-shm
 *.db-wal

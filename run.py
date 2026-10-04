@@ -27,7 +27,9 @@ if sys.platform == 'win32':
 # --------------------------
 # Basic configuration
 # --------------------------
-VENV_DIR = PROJECT_ROOT / "venv_rguard"
+# Keep the environment in the conventional location so the documented
+# command and the launcher use the same interpreter.
+VENV_DIR = PROJECT_ROOT / ".venv"
 LOG_DIR = PROJECT_ROOT / "logs"
 LOG_FILE = LOG_DIR / f"launcher_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}.log"
 CONFIG_FILE = PROJECT_ROOT / "config.json"
@@ -42,9 +44,9 @@ DEFAULT_CONFIG = {
     "service_name": "RansomGuardService",
     "auto_git_pull": False,
     "required_packages": [
-        "fastapi", "uvicorn[standard]", "websockets", "psutil", "watchdog",
+        "fastapi", "uvicorn[standard]", "websockets", "httpx", "psutil", "watchdog",
         "aiosqlite", "scikit-learn", "numpy", "pydantic", "pandas", "lightgbm",
-        "xgboost", "windows-toasts", "openai", "python-dotenv", "joblib","google-generativeai"
+        "xgboost", "windows-toasts", "openai", "python-dotenv", "joblib", "google-genai"
     ],
     "max_start_retries": 3,
     "enable_crash_reporter": False,
@@ -215,27 +217,46 @@ def ensure_venv_and_reexec():
 
     import venv
     if not VENV_DIR.exists():
-        logger.info("Creating venv_rguard...")
+        logger.info("Creating .venv...")
         venv.EnvBuilder(with_pip=True).create(VENV_DIR)
 
     python = VENV_DIR / ("Scripts/python.exe" if is_windows() else "bin/python")
-    os.execv(str(python), [str(python), str(Path(__file__).resolve())] + sys.argv[1:])
+    logger.info("Re-launching with project environment: %s", python)
+    result = subprocess.run(
+        [str(python), str(Path(__file__).resolve()), *sys.argv[1:]],
+        cwd=str(PROJECT_ROOT),
+    )
+    raise SystemExit(result.returncode)
 # --------------------------
 # Dependency Installer
 # --------------------------
 def install_packages(packages: List[str]):
     """Install packages only if missing"""
     import importlib.util
+
+    requirements_file = PROJECT_ROOT / "requirements.txt"
+    if requirements_file.exists():
+        requirement_specs = [
+            line.strip()
+            for line in requirements_file.read_text(encoding="utf-8").splitlines()
+            if line.strip() and not line.lstrip().startswith("#")
+        ]
+    else:
+        requirement_specs = packages
     
     import_name_overrides = {
         "scikit-learn": "sklearn",
         "pycryptodome": "Crypto",
+        "python-multipart": "multipart",
+        "PyYAML": "yaml",
         "python-dotenv": "dotenv",
         "windows-toasts": "windows_toasts",
+        "google-genai": "google.genai",
+        "pywin32": "win32api",
     }
 
     missing = []
-    for p in packages:
+    for p in requirement_specs:
         # Normalize package tokens like `uvicorn[standard]` or `pkg==1.2.3`
         base_pkg = p.split("[", 1)[0]
         base_pkg = base_pkg.split("==", 1)[0].split(">=", 1)[0].split("<=", 1)[0]
@@ -252,8 +273,27 @@ def install_packages(packages: List[str]):
             missing.append(p)
     
     if missing:
-        logger.info("Installing missing packages: %s", ", ".join(missing))
-        run_cmd([sys.executable, "-m", "pip", "install", "--timeout", "300"] + missing)
+        logger.info("Installing missing packages from pinned requirements: %s", ", ".join(missing))
+        if requirements_file.exists():
+            return_code = run_cmd(
+                [
+                    sys.executable,
+                    "-m",
+                    "pip",
+                    "install",
+                    "--timeout",
+                    "300",
+                    "-r",
+                    str(requirements_file),
+                ]
+            )
+        else:
+            return_code = run_cmd([sys.executable, "-m", "pip", "install", "--timeout", "300"] + missing)
+        if return_code != 0:
+            raise RuntimeError(
+                "Dependency installation failed. Run '.\\.venv\\Scripts\\python.exe -m pip install -r requirements.txt' "
+                "to see the full pip error."
+            )
     else:
         logger.info(" All dependencies already installed")
 
@@ -419,10 +459,11 @@ def maybe_run_safe_simulator(argv: List[str]) -> bool:
 # --------------------------
 def main():
     try:
-        animated_banner()
         cfg = load_config()
 
         ensure_venv_and_reexec()
+
+        animated_banner()
 
         if cfg["auto_install_dependencies"] and not getattr(sys, "frozen", False):
             install_packages(cfg["required_packages"])

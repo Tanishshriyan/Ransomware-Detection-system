@@ -27,10 +27,11 @@ What it does not claim:
 ## Project Phases
 
 ### Phase 1: Setup and Installation
-- Install Python dependencies from `requirements.txt`
-- Configure `config.yaml` for server, database, and monitoring settings
-- Build and run the application using `python run.py` or the packaged executable
-- Verify health endpoints and dashboard accessibility
+- Install Python 3.12.
+- Start the application with `start.ps1`, `start.bat`, or `python run.py`.
+- The launcher creates `.venv`, installs the pinned dependencies, and opens the dashboard.
+- Configure `config.yaml` only when you need to change server, database, or monitoring settings.
+- Verify the health endpoint and dashboard accessibility.
 
 ### Phase 2: Detection and Monitoring
 - Monitor file system changes and process behaviors in real-time
@@ -46,6 +47,15 @@ What it does not claim:
 - Persistent logging and forensic data collection
 
 ## Engineering Updates
+
+### 2026-10-01
+
+Changes made in this pass:
+
+- Added a single-command Windows entry point (`start.ps1` and `start.bat`).
+- Standardized the automatic environment to `.venv` so manual and launcher commands agree.
+- Fixed incompatible dependency pins between FastAPI, AnyIO, HTTPX, WebSockets, and the Google GenAI SDK.
+- Launcher dependency failures now stop with a clear actionable error.
 
 ### 2026-03-25
 
@@ -65,7 +75,7 @@ Changes made in this pass:
 Changes made in this pass:
 
 - Removed demo-event endpoints and simulator workflow from runtime path.
-- Enforced automatic termination for process threats at score `>= 60`.
+- Enforced automatic termination for process threats at the configured threshold (85 by default).
 - Added strict PID-only containment (no process-name mass-kill fallback).
 - Added external process start/list/stop APIs and dashboard controls.
 - Added post-termination protection events for clear dashboard visibility.
@@ -100,12 +110,13 @@ Environment overrides supported by `utils/config.py`:
 - `RG_DB_PATH`
 - `RG_KILLSWITCH_ENABLED`
 - `RG_KILLSWITCH_THRESHOLD`
+- `RG_API_KEY`
 - `RG_GEMINI_API_KEY`
 
 Security behavior:
 
 - `security.cors_origins` controls allowed browser origins
-- if `security.enable_authentication` is `true`, state-changing API routes require `X-API-Key`
+- if `security.enable_authentication` is `true`, operator routes and the WebSocket require `X-API-Key` (the WebSocket accepts `?api_key=`)
 - startup now fails fast if authentication is enabled but `security.api_key` is blank
 
 Legacy note:
@@ -114,21 +125,26 @@ Legacy note:
 
 ## Getting Started
 
-1. Create and activate a Python 3.12 environment.
-2. Install dependencies from `requirements.txt`.
-3. Verify that the model files exist in `ml_model/models/`.
-4. Review `config.yaml`.
-5. Start the app with `python run.py`.
+1. Install Python 3.12.
+2. Open PowerShell in the repository folder.
+3. Run `.\start.ps1`.
+
+The first run creates `.venv` and installs dependencies. Later runs use the existing environment.
+
+Equivalent commands are `.\start.bat` or `python run.py`.
 
 The launcher now defaults to safer behavior:
 
-- dependency installation is opt-in
+- dependency installation is automatic on first run
 - `git pull` is opt-in
 - host and port default to the values in `config.yaml`
 
 If you enable API auth, call protected endpoints with:
 
 - header: `X-API-Key: <your configured key>`
+
+For the browser dashboard, set the key in its origin's local storage as
+`ransomguard_api_key` before connecting.
 
 ## EXE Build And Run
 
@@ -184,7 +200,7 @@ The chat assistant reads from this schema and derives high-risk context from rec
 ## External Process Execution
 
 Dashboard process controls launch real executables and register their PIDs.
-The monitoring engine uses that exact PID to score, terminate (at score `>= 60`),
+The monitoring engine uses that exact PID to score, terminate (at the configured threshold),
 and emit post-action events to the dashboard.
 
 ## Development Priorities
@@ -220,7 +236,7 @@ Recommended baseline:
 - `aiosqlite`
 - `python-dotenv`
 - `windows-toasts`
-- `google-generativeai`
+- `google-genai`
 - `pandas`
 - `lightgbm`
 - `xgboost`

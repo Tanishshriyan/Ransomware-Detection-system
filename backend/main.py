@@ -6,6 +6,7 @@ RansomGuard - Main Backend Server (Production Rewrite)
 """
 
 import asyncio
+import hmac
 import json
 import logging
 import os
@@ -76,6 +77,7 @@ except Exception as e:
 try:
     import joblib
     import os
+    from ml_model.schema import MODEL_FEATURE_NAMES, SCHEMA_VERSION, canonicalize_features
     
     class RealMLDetector:
         def __init__(self):
@@ -123,24 +125,11 @@ try:
             
             try:
                 # Extract feature values in correct order
-                feature_names = [
-                    'file_writes', 'file_deletes', 'file_renames', 'cpu_percent',
-                    'memory_mb', 'network_connections', 'cpu_spike_count',
-                    'entropy_mean', 'suspicious_extensions', 'rapid_file_ops',
-                    'file_create_rate', 'file_delete_rate', 'file_modify_rate',
-                    'io_write_bytes', 'io_read_bytes', 'process_age_seconds',
-                    'parent_suspicious', 'cmdline_suspicious', 'hidden_files',
-                    'system_file_modifications', 'registry_modifications',
-                    'process_injection_attempts'
-                ]
-                
-                # Build feature vector
                 import numpy as np
-                X = []
-                for fname in feature_names:
-                    X.append(features.get(fname, 0))
-                
-                X = np.array([X])
+                ordered = canonicalize_features(features)
+                if len(ordered) != len(MODEL_FEATURE_NAMES):
+                    raise ValueError(f"{SCHEMA_VERSION} produced {len(ordered)} features")
+                X = np.array([[ordered[name] for name in MODEL_FEATURE_NAMES]], dtype=float)
                 
                 # Scale features
                 X_scaled = self.scaler.transform(X)
@@ -302,7 +291,7 @@ def require_api_key(x_api_key: Optional[str] = Header(default=None)) -> None:
         raise HTTPException(status_code=503, detail="Authentication is enabled but no API key is configured")
 
     supplied = str(x_api_key or "").strip()
-    if supplied != expected:
+    if not hmac.compare_digest(supplied, expected):
         raise HTTPException(status_code=401, detail="Invalid or missing API key")
 
 
@@ -334,7 +323,7 @@ async def process_user_decision(req: dict, _: None = Depends(require_api_key)):
 
 
 @app.get("/api/pending_alerts")
-async def get_pending_alerts():
+async def get_pending_alerts(_: None = Depends(require_api_key)):
     if not app_state.monitor:
         return []
     return app_state.monitor.notification_manager.get_pending_alerts()
@@ -358,7 +347,7 @@ async def process_alert_decision(req: AlertDecisionRequest, _: None = Depends(re
 
 
 @app.get("/api/controlled-folders")
-async def get_controlled_folders():
+async def get_controlled_folders(_: None = Depends(require_api_key)):
     if not app_state.monitor:
         return {"success": True, "config": {}}
     try:
@@ -474,7 +463,7 @@ async def start_external_process(req: ExternalProcessStartRequest, _: None = Dep
 
 
 @app.get("/api/processes")
-async def list_external_processes():
+async def list_external_processes(_: None = Depends(require_api_key)):
     if not app_state.monitor:
         return {"success": True, "processes": []}
     return {"success": True, "processes": app_state.monitor.get_registered_external_processes()}
@@ -766,6 +755,7 @@ class ApplicationState:
         with self.demo_lock:
             if self.demo_process and self.demo_process.poll() is None:
                 pid = int(self.demo_process.pid)
+                stop_reason = "manual_stop"
                 try:
                     self.demo_process.terminate()
                     self.demo_process.wait(timeout=5)
@@ -786,8 +776,41 @@ class ApplicationState:
 
                 if self.monitor:
                     self.monitor.registered_external_processes.pop(pid, None)
+
+                # A manual stop is still a containment action. Mark an
+                # already-recorded incident as blocked so it cannot remain in
+                # the dashboard's active-threat list after the process exits.
+                existing_threat = self.threat_manager.get_threat(pid)
+                if existing_threat and existing_threat.get("status") == "ACTIVE":
+                    self.threat_manager.mark_blocked(
+                        pid=pid,
+                        process_name=self.demo_process_name or "safe_file_churn_simulator",
+                        score=int(existing_threat.get("score") or config.killswitch_threshold),
+                        operation=stop_reason,
+                    )
+
+                cleanup = self.cleanup_demo_artifacts()
+                logger.warning(
+                    "[DEMO] Manual stop completed pid=%s restored_files=%s removed_notes=%s",
+                    pid,
+                    cleanup.get("restored_files", 0),
+                    cleanup.get("removed_notes", 0),
+                )
+                self.threat_manager.remove_pid_exemption(pid)
                 return True
             return False
+
+    def cleanup_demo_artifacts(self) -> dict:
+        """Restore only the benign simulator artifacts in its dedicated folder."""
+        if not self.demo_target_dir:
+            return {"restored_files": 0, "removed_notes": 0}
+        try:
+            from utils.safe_file_churn_simulator import cleanup_simulation_artifacts
+
+            return cleanup_simulation_artifacts(Path(self.demo_target_dir))
+        except Exception:
+            logger.exception("[DEMO] Failed to clean simulator artifacts")
+            return {"restored_files": 0, "removed_notes": 0}
 
 app_state = ApplicationState()
 app_state._main_loop = None
@@ -1276,6 +1299,8 @@ async def ensure_detection_services_started():
                 app_state.monitor = SystemMonitor(
                     callback=thread_safe_callback,
                     threat_manager=app_state.threat_manager,
+                    analyzer=app_state.behavioral_analyzer,
+                    detector=app_state.detector,
                 )
                 logger.info("[DETECTION] SystemMonitor instance created")
 
@@ -1424,7 +1449,7 @@ async def root():
     return HTMLResponse("<h1>RansomGuard</h1><p>Dashboard not installed.</p>")
 
 @app.get("/api/status")
-async def get_status():
+async def get_status(_: None = Depends(require_api_key)):
     stats = app_state.get_statistics()
     threat_summary = app_state.threat_manager.get_summary(include_closed=True)
     return JSONResponse({
@@ -1441,11 +1466,11 @@ async def get_status():
     })
 
 @app.get("/api/events/recent")
-async def get_recent_events(limit: int = Query(50, le=100)):
+async def get_recent_events(limit: int = Query(50, le=100), _: None = Depends(require_api_key)):
     return JSONResponse(app_state.events_history[:limit])
 
 @app.get("/api/events/count")
-async def get_event_count():
+async def get_event_count(_: None = Depends(require_api_key)):
     return JSONResponse({
         "total": app_state.stats['total_events'],
         "high_risk": app_state.stats['high_risk_events'],
@@ -1453,12 +1478,12 @@ async def get_event_count():
     })
 
 @app.get("/api/statistics")
-async def get_statistics():
+async def get_statistics(_: None = Depends(require_api_key)):
     return JSONResponse(app_state.get_statistics())
 
 
 @app.get("/api/logs")
-async def get_logs(limit: int = Query(50, le=100)):
+async def get_logs(limit: int = Query(50, le=100), _: None = Depends(require_api_key)):
     try:
         logs = await app_state.db.get_recent_logs(limit)
         return JSONResponse(logs)
@@ -1467,7 +1492,7 @@ async def get_logs(limit: int = Query(50, le=100)):
 
 
 @app.post("/api/demo/start")
-async def demo_start(payload: Optional[dict] = None):
+async def demo_start(payload: Optional[dict] = None, _: None = Depends(require_api_key)):
     await ensure_detection_services_started()
     payload = payload or {}
 
@@ -1537,8 +1562,16 @@ async def demo_start(payload: Optional[dict] = None):
                 stdout=stdout_handle,
                 stderr=stderr_handle,
             )
+            # Do not exempt the simulator PID. It intentionally produces
+            # ransomware-like telemetry, so the normal exact-PID containment
+            # path must be able to terminate it on the first high-risk event.
             if app_state.monitor:
-                app_state.monitor.register_external_process(proc.pid, "safe_file_churn_simulator", sys.executable)
+                app_state.monitor.register_external_process(
+                    proc.pid,
+                    "safe_file_churn_simulator",
+                    sys.executable,
+                    target_paths=[demo_dir],
+                )
         except Exception as e:
             if stdout_handle:
                 stdout_handle.close()
@@ -1571,6 +1604,7 @@ async def demo_start(payload: Optional[dict] = None):
                 pid=proc.pid,
                 process_name=app_state.demo_process_name,
                 exe_path=str(runner_identity),
+                target_paths=[demo_dir],
             )
 
         def monitor_demo(open_stdout, open_stderr):
@@ -1596,8 +1630,20 @@ async def demo_start(payload: Optional[dict] = None):
                 with app_state.demo_lock:
                     if app_state.demo_start_time:
                         app_state.demo_duration_seconds = int(max(0, time.time() - app_state.demo_start_time))
+                    existing_threat = app_state.threat_manager.get_threat(proc.pid)
+                    blocked_by_guard = bool(existing_threat and existing_threat.get("was_blocked"))
                     if app_state.demo_state != "stopped":
-                        if ret == 0:
+                        if blocked_by_guard:
+                            app_state.demo_state = "blocked"
+                            app_state.demo_last_error = None
+                            cleanup = app_state.cleanup_demo_artifacts()
+                            logger.warning(
+                                "[DEMO] Automatic containment completed pid=%s restored_files=%s removed_notes=%s",
+                                proc.pid,
+                                cleanup.get("restored_files", 0),
+                                cleanup.get("removed_notes", 0),
+                            )
+                        elif ret == 0:
                             app_state.demo_state = "completed"
                         else:
                             app_state.demo_state = "failed"
@@ -1609,13 +1655,14 @@ async def demo_start(payload: Optional[dict] = None):
 
                 if app_state.monitor:
                     app_state.monitor.registered_external_processes.pop(proc.pid, None)
+                app_state.threat_manager.remove_pid_exemption(proc.pid)
 
         threading.Thread(target=monitor_demo, args=(stdout_handle, stderr_handle), daemon=True).start()
         return JSONResponse({"success": True, "demo": app_state.get_demo_status()})
 
 
 @app.get("/api/demo/status")
-async def demo_status():
+async def demo_status(_: None = Depends(require_api_key)):
     threat_summary = app_state.threat_manager.get_summary(include_closed=True)
     return JSONResponse({
         "success": True,
@@ -1625,7 +1672,7 @@ async def demo_status():
 
 
 @app.post("/api/demo/stop")
-async def demo_stop():
+async def demo_stop(_: None = Depends(require_api_key)):
     stopped = app_state.stop_demo()
     if not stopped:
         raise HTTPException(status_code=404, detail="Demo not running")
@@ -1645,11 +1692,11 @@ async def toggle_killswitch(enabled: bool, _: None = Depends(require_api_key)):
     return JSONResponse({"success": True, "killswitch_enabled": enabled, "threshold": app_state.kill_switch.threat_threshold})
 
 @app.get("/api/killswitch/history")
-async def get_kill_history(limit: int = Query(50, le=100)):
+async def get_kill_history(limit: int = Query(50, le=100), _: None = Depends(require_api_key)):
     return JSONResponse(app_state.kill_switch.get_kill_history(limit))
 
 @app.get("/api/killswitch/blocked")
-async def get_blocked():
+async def get_blocked(_: None = Depends(require_api_key)):
     blocked = app_state.kill_switch.get_blocked_processes()
     return JSONResponse({"blocked_processes": blocked, "count": len(blocked)})
 
@@ -1663,8 +1710,16 @@ async def health():
     })
 # --------------------- WebSocket Endpoint ----------------------------------
 @app.websocket("/ws")
-async def websocket_endpoint(websocket: WebSocket):
+async def websocket_endpoint(websocket: WebSocket, api_key: Optional[str] = Query(default=None)):
     logger.info("[WEBSOCKET] New connection attempt from client")
+
+    if config.get("security.enable_authentication", False):
+        expected = str(config.get("security.api_key", "") or "").strip()
+        supplied = str(api_key or websocket.headers.get("x-api-key") or "").strip()
+        if not expected or not hmac.compare_digest(supplied, expected):
+            await websocket.close(code=1008)
+            logger.warning("[WEBSOCKET] Connection rejected by API authentication")
+            return
 
     if not app_state.detection_services_started:
         await ensure_detection_services_started()
