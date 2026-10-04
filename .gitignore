@@ -24,6 +24,10 @@ data/test_monitoring/
 # of the application repository.
 research/
 quality_tests/test_research_instrumentation.py
+backend/dataset_generator.py
+dataset_generator.py
+data/training_data/Real_dataset_generator.py
+data/training_data/ransomware_dataset.csv
 
 *.db-shm
 *.db-wal

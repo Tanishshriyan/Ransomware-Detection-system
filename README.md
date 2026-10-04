@@ -58,6 +58,7 @@ Changes made in this pass:
 - Launcher dependency failures now stop with a clear actionable error.
 - The published change set is limited to runtime, launcher, model-contract, dashboard, test, and documentation updates.
 - Research artifacts, generated traces, virtual environments, logs, caches, and local monitoring data remain excluded.
+- Dataset-generation utilities and generated training data are not part of the runtime repository.
 - API keys and other credentials must be supplied through environment variables; real secrets are not stored in source control.
 
 ### 2026-03-25
