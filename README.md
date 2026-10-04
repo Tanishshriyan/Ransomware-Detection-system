@@ -56,6 +56,9 @@ Changes made in this pass:
 - Standardized the automatic environment to `.venv` so manual and launcher commands agree.
 - Fixed incompatible dependency pins between FastAPI, AnyIO, HTTPX, WebSockets, and the Google GenAI SDK.
 - Launcher dependency failures now stop with a clear actionable error.
+- The published change set is limited to runtime, launcher, model-contract, dashboard, test, and documentation updates.
+- Research artifacts, generated traces, virtual environments, logs, caches, and local monitoring data remain excluded.
+- API keys and other credentials must be supplied through environment variables; real secrets are not stored in source control.
 
 ### 2026-03-25
 
